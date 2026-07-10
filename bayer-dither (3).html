@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DITHER — Bayer Ordered Dither</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --accent: hsl(140 70% 55%);
+    --bg:#0b0c0b; --panel:#131513; --panel-2:#1a1d1a; --line:#2a2e2a;
+    --ink:#e8eae6; --ink-dim:#8b918a; --ink-faint:#5a605a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px;line-height:1.5;
+    overflow-x:hidden;-webkit-font-smoothing:antialiased;
+  }
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:999;opacity:.045;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+  .wrap{display:grid;grid-template-columns:330px 1fr;min-height:100vh}
+  @media (max-width:880px){.wrap{grid-template-columns:1fr}}
+
+  aside{background:var(--panel);border-right:1px solid var(--line);padding:22px 20px 40px;display:flex;flex-direction:column;gap:22px}
+  .brand{display:flex;flex-direction:column;gap:2px;border-bottom:1px solid var(--line);padding-bottom:16px}
+  .brand h1{font-family:"Fraunces",serif;font-weight:600;font-size:26px;letter-spacing:-.01em;line-height:1;color:var(--ink)}
+  .brand .dot{color:var(--accent);transition:color .25s}
+  .brand p{color:var(--ink-faint);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;margin-top:6px}
+
+  .group{display:flex;flex-direction:column;gap:11px}
+  .group>.label{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim);display:flex;justify-content:space-between;align-items:baseline}
+  .group>.label b{color:var(--accent);font-weight:500;transition:color .2s}
+
+  .swatches{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}
+  .sw{aspect-ratio:1;border-radius:5px;border:1.5px solid transparent;cursor:pointer;position:relative;transition:transform .12s,border-color .12s}
+  .sw:hover{transform:translateY(-2px)}
+  .sw.on{border-color:var(--ink)}
+  .sw.on::after{content:"";position:absolute;inset:-5px;border:1px solid var(--accent);border-radius:8px;opacity:.5}
+
+  .ctrl{display:flex;flex-direction:column;gap:7px}
+  .ctrl .label{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim);display:flex;justify-content:space-between}
+  .ctrl .label .val{color:var(--ink);font-variant-numeric:tabular-nums}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:3px;
+    background:linear-gradient(90deg,var(--accent) var(--p,40%),var(--line) var(--p,40%));cursor:pointer;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;height:15px;width:15px;border-radius:50%;background:var(--ink);border:3px solid var(--panel);box-shadow:0 0 0 1px var(--accent);cursor:pointer}
+  input[type=range]::-moz-range-thumb{height:12px;width:12px;border-radius:50%;background:var(--ink);border:2px solid var(--accent);cursor:pointer}
+
+  .toggle{padding:8px 4px;border:1px solid var(--line);border-radius:6px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);cursor:pointer;user-select:none;transition:.15s;background:var(--panel-2);text-align:center}
+  .toggle.on{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:600}
+
+  .btn{width:100%;padding:11px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);border-radius:7px;font-family:inherit;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;transition:.15s}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+  .btn.primary:hover{filter:brightness(1.1);color:var(--bg)}
+  .btn:disabled{opacity:.35;cursor:not-allowed;border-color:var(--line);color:var(--ink-faint)}
+  .divider{height:1px;background:var(--line);margin:2px 0}
+
+  /* variant legend */
+  .legend{display:flex;gap:6px;align-items:flex-end}
+  .legend .cell{flex:1;aspect-ratio:1;border-radius:4px;border:1px solid var(--line);overflow:hidden}
+  .legend .cap{font-size:9px;color:var(--ink-faint);text-align:center;margin-top:4px;letter-spacing:.05em}
+  .legend-wrap{display:flex;gap:6px}
+  .legend-col{display:flex;flex-direction:column;flex:1}
+
+  main{position:relative;display:flex;align-items:center;justify-content:center;padding:34px;overflow:hidden}
+  #drop{width:100%;max-width:760px;aspect-ratio:1;border:1.5px dashed var(--line);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;color:var(--ink-faint);transition:.2s;cursor:pointer;padding:30px}
+  #drop.over{border-color:var(--accent);color:var(--ink-dim);background:rgba(255,255,255,.015)}
+  #drop .big{font-family:"Fraunces",serif;font-size:22px;color:var(--ink-dim)}
+  #drop .sub{font-size:11px;letter-spacing:.1em;max-width:280px}
+  #drop .glyph{font-size:34px;color:var(--line)}
+
+  .canvas-shell{display:none;flex-direction:column;gap:16px;align-items:center;max-width:100%}
+  .canvas-frame{position:relative;border-radius:10px;overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.7);border:1px solid var(--line);max-width:100%}
+  .canvas-frame.alpha{
+    background-color:#6b6b6b;
+    background-image:
+      linear-gradient(45deg,#4a4a4a 25%,transparent 25%),
+      linear-gradient(-45deg,#4a4a4a 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#4a4a4a 75%),
+      linear-gradient(-45deg,transparent 75%,#4a4a4a 75%);
+    background-size:20px 20px;
+    background-position:0 0,0 10px,10px -10px,-10px 0;
+  }
+  canvas{display:block;max-width:100%;height:auto}
+  .meta{display:flex;gap:18px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint)}
+  .meta span b{color:var(--ink-dim);font-weight:500}
+  .hint{font-size:10px;color:var(--ink-faint);letter-spacing:.08em;line-height:1.7}
+  .hint kbd{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--ink-dim)}
+  input[type=file]{display:none}
+  .seg{display:flex;gap:8px}
+  .seg .toggle{flex:1}
+  .sub-ctrl{transition:opacity .2s}
+  .sub-ctrl.off{opacity:.32;pointer-events:none}
+  .videobar{display:flex;align-items:center;gap:12px;width:100%;max-width:760px;padding:4px 2px}
+  .vbtn{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);border-radius:7px;width:38px;height:34px;font-size:13px;cursor:pointer;flex:none;transition:.15s;font-family:inherit}
+  .vbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .vbtn.loop.on{color:var(--accent);border-color:var(--accent)}
+  .videobar #scrub{flex:1}
+  .tlabel{font-size:10px;color:var(--ink-faint);letter-spacing:.08em;font-variant-numeric:tabular-nums;flex:none;min-width:78px;text-align:right}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside>
+    <div class="brand">
+      <h1>Dither<span class="dot">.</span></h1>
+      <p>Bayer Ordered Dither</p>
+    </div>
+
+    <div class="group">
+      <div class="label">Source</div>
+      <button class="btn" id="uploadBtn">Upload image / video</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="group">
+      <div class="label">Shade <b id="colorName">Green</b></div>
+      <div class="swatches" id="swatches"></div>
+      <div class="ctrl">
+        <div class="label">Custom hue <span class="val" id="hueVal">140°</span></div>
+        <input type="range" id="hue" min="0" max="359" value="140">
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="label">Mode</div>
+      <div class="seg">
+        <div class="toggle on" id="modeMono" data-mode="mono">Mono</div>
+        <div class="toggle" id="modeRGB" data-mode="rgb">RGB</div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="label">Bayer matrix <b id="matrixName">8 × 8</b></div>
+      <div class="seg">
+        <div class="toggle" id="mx2" data-mx="2">2</div>
+        <div class="toggle" id="mx4" data-mx="4">4</div>
+        <div class="toggle on" id="mx8" data-mx="8">8</div>
+        <div class="toggle" id="mx16" data-mx="16">16</div>
+      </div>
+      <div class="ctrl">
+        <div class="label">Levels / shades <span class="val" id="levelsVal">2</span></div>
+        <input type="range" id="levels" min="2" max="8" value="2">
+      </div>
+      <div class="ctrl">
+        <div class="label">Pixel size <span class="val" id="pixelVal">4</span></div>
+        <input type="range" id="pixel" min="1" max="20" value="4">
+      </div>
+      <div class="ctrl">
+        <div class="label">Contrast <span class="val" id="contrastVal">1.10</span></div>
+        <input type="range" id="contrast" min="50" max="280" value="110">
+      </div>
+      <div class="seg">
+        <div class="toggle" id="invert" style="flex:1">Invert tones</div>
+        <div class="toggle" id="alpha" style="flex:1">Transparency</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="group">
+      <div class="label">Palette <b id="variantCount">2 shades</b></div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="divider"></div>
+    <button class="btn primary" id="downloadBtn" disabled>⤓ Download PNG</button>
+  </aside>
+
+  <main>
+    <div id="drop">
+      <div class="glyph">▦</div>
+      <div class="big">Drop an image or video here</div>
+      <div class="sub">MP4 / MOV / WebM or any image · click to browse · paste works too</div>
+    </div>
+    <div class="canvas-shell" id="shell">
+      <div class="canvas-frame"><canvas id="out"></canvas></div>
+      <div class="videobar" id="videoBar" style="display:none">
+        <button class="vbtn" id="playBtn">►</button>
+        <input type="range" id="scrub" min="0" max="1" step="0.001" value="0">
+        <span class="tlabel" id="timeLbl">0:00 / 0:00</span>
+        <button class="vbtn loop on" id="loopBtn" title="Loop">↺</button>
+      </div>
+      <div class="meta">
+        <span><b>GRID</b> <i id="mGrid">—</i></span>
+        <span><b>MATRIX</b> <i id="mMatrix">—</i></span>
+        <span><b>LEVELS</b> <i id="mLevels">—</i></span>
+      </div>
+      <div class="hint">Bayer ordered dithering on images &amp; video. Mono dithers brightness; RGB dithers each channel. <kbd>Space</kbd> play/pause · <kbd>R</kbd> re-upload.</div>
+    </div>
+  </main>
+</div>
+<input type="file" id="file" accept="image/*,video/*">
+
+<script>
+/* =====================================================================
+   DITHER — Bayer ordered dithering.
+   The frame is pixelated into cells, and each cell's value is compared
+   against a position-dependent threshold from a Bayer matrix to choose
+   one of N output shades (ordered dithering).
+
+   Two modes:
+   - Mono: dithers brightness across N shades of the chosen hue
+           (2 shades = the classic 1-bit look, in your colour).
+   - RGB:  dithers each of the R/G/B channels independently to N levels,
+           giving the retro reduced-colour-depth dither.
+   Works on still images and video (frame by frame), with WebM export.
+   ===================================================================== */
+
+const state = {
+  hue:140, isGray:false,
+  matrix:8, levels:2, pixel:4, contrast:110, invert:false, alpha:false,
+  mode:'mono',
+};
+
+let srcImg=null, srcData=null, outW=0, outH=0;
+let isVideo=false, videoEl=null, playing=false, recording=false;
+const out=document.getElementById('out');
+const octx=out.getContext('2d');
+
+// ---- presets ----
+const PRESETS=[
+  {name:'Green',hue:140,gray:false},{name:'Cyan',hue:182,gray:false},
+  {name:'Blue',hue:212,gray:false},{name:'Violet',hue:268,gray:false},
+  {name:'Magenta',hue:318,gray:false},{name:'Red',hue:2,gray:false},
+  {name:'Orange',hue:26,gray:false},{name:'Amber',hue:44,gray:false},
+  {name:'Teal',hue:165,gray:false},{name:'Indigo',hue:240,gray:false},
+  {name:'Pink',hue:340,gray:false},{name:'Mono',hue:0,gray:true},
+];
+const swWrap=document.getElementById('swatches');
+PRESETS.forEach((p,i)=>{
+  const d=document.createElement('div');
+  d.className='sw';
+  d.style.background=p.gray?'linear-gradient(145deg,#2a2a2a,#e2e2e2)'
+    :`linear-gradient(145deg,hsl(${p.hue} 55% 22%),hsl(${p.hue} 30% 90%))`;
+  d.title=p.name;
+  d.addEventListener('click',()=>{
+    state.hue=p.hue;state.isGray=p.gray;
+    document.getElementById('hue').value=p.hue;
+    document.getElementById('hueVal').textContent=p.hue+'°';
+    markSwatch(i);
+    document.getElementById('colorName').textContent=p.name;
+    applyAccent();drawLegend();render();
+  });
+  swWrap.appendChild(d);
+});
+function markSwatch(i){[...swWrap.children].forEach((c,j)=>c.classList.toggle('on',j===i));}
+markSwatch(0);
+
+// ---- palette of N shades (dark -> light) of the chosen hue ----
+function buildLevels(L){
+  const gray=state.isGray, h=state.hue;
+  const lDark=gray?15:21, lLight=gray?91:90;
+  const sDark=gray?0:58,  sLight=gray?0:32;
+  const arr=[];
+  for(let i=0;i<L;i++){
+    const t=L===1?0:i/(L-1);
+    const s=sDark+(sLight-sDark)*t, l=lDark+(lLight-lDark)*t;
+    arr.push(`hsl(${h} ${s}% ${l}%)`);
+  }
+  return arr;                          // idx0 = darkest, idxL-1 = lightest
+}
+// single solid colour used when levels are expressed as transparency
+function inkColor(){ return state.isGray ? 'hsl(0 0% 22%)' : `hsl(${state.hue} 68% 46%)`; }
+
+// ---- Bayer threshold matrix (size = power of two), normalised 0..1 ----
+const _bayerCache={};
+function bayerNorm(n){
+  if(_bayerCache[n]) return _bayerCache[n];
+  function build(m){
+    if(m===1) return [[0]];
+    const h=build(m/2), s=h.length, out=[];
+    for(let y=0;y<m;y++) out.push(new Array(m));
+    for(let y=0;y<s;y++)for(let x=0;x<s;x++){
+      const v=h[y][x];
+      out[y][x]=4*v;      out[y][x+s]=4*v+2;
+      out[y+s][x]=4*v+3;  out[y+s][x+s]=4*v+1;
+    }
+    return out;
+  }
+  const raw=build(n), nn=n*n, norm=[];
+  for(let y=0;y<n;y++){ norm.push(new Array(n)); for(let x=0;x<n;x++) norm[y][x]=(raw[y][x]+0.5)/nn; }
+  _bayerCache[n]=norm; return norm;
+}
+// ordered dither a value (0..1) to an index in 0..L-1 using threshold t (0..1)
+function ditherLevel(v,t,L){
+  const s=v*(L-1), li=Math.floor(s), frac=s-li;
+  let idx=li+(frac>t?1:0);
+  return idx<0?0:idx>L-1?L-1:idx;
+}
+
+// ---- frame capture + sampling ----
+let sampleCanvas=null, sctx=null;
+function ensureSampleCanvas(){
+  if(!sampleCanvas){ sampleCanvas=document.createElement('canvas'); sctx=sampleCanvas.getContext('2d',{willReadFrequently:true}); }
+  if(sampleCanvas.width!==outW||sampleCanvas.height!==outH){ sampleCanvas.width=outW; sampleCanvas.height=outH; }
+}
+// draw the current source (image, or the current video frame) and read its pixels
+function captureSource(){
+  if(!outW||!outH) return;
+  ensureSampleCanvas();
+  const src = isVideo ? videoEl : srcImg;
+  if(!src) return;
+  try{ sctx.drawImage(src,0,0,outW,outH); srcData = sctx.getImageData(0,0,outW,outH).data; }
+  catch(e){ /* frame not ready */ }
+}
+function sampleBrightness(x,y,w,h){
+  let x0=Math.max(0,x|0), y0=Math.max(0,y|0);
+  let x1=Math.min(outW-1,(x+w)|0), y1=Math.min(outH-1,(y+h)|0);
+  if(x1<x0)x1=x0; if(y1<y0)y1=y0;
+  let sum=0,cnt=0;
+  const sx=Math.max(1,Math.floor((x1-x0)/3)), sy=Math.max(1,Math.floor((y1-y0)/3));
+  for(let yy=y0;yy<=y1;yy+=sy){
+    const r=(yy*outW)*4;
+    for(let xx=x0;xx<=x1;xx+=sx){
+      const p=r+xx*4;
+      sum += 0.2126*srcData[p]+0.7152*srcData[p+1]+0.0722*srcData[p+2];
+      cnt++;
+    }
+  }
+  return cnt?sum/(cnt*255):0;
+}
+// average of one channel (0=R,1=G,2=B), normalised 0..1
+function sampleChannel(x,y,w,h,ch){
+  let x0=Math.max(0,x|0), y0=Math.max(0,y|0);
+  let x1=Math.min(outW-1,(x+w)|0), y1=Math.min(outH-1,(y+h)|0);
+  if(x1<x0)x1=x0; if(y1<y0)y1=y0;
+  let sum=0,cnt=0;
+  const sx=Math.max(1,Math.floor((x1-x0)/3)), sy=Math.max(1,Math.floor((y1-y0)/3));
+  for(let yy=y0;yy<=y1;yy+=sy){
+    const r=(yy*outW)*4;
+    for(let xx=x0;xx<=x1;xx+=sx){ sum+=srcData[r+xx*4+ch]; cnt++; }
+  }
+  return cnt?sum/(cnt*255):0;
+}
+
+// ---- render ----
+function render(){
+  if(!srcData||!outW) return;
+  const P=Math.max(1,state.pixel);
+  const gx=Math.max(1,Math.round(outW/P));
+  const gy=Math.max(1,Math.round(outH/P));
+  const cellW=outW/gx, cellH=outH/gy;
+  const n=state.matrix, B=bayerNorm(n);
+  const L=state.levels;
+  const contrast=state.contrast/100;
+
+  out.width=outW; out.height=outH;
+  octx.globalCompositeOperation='source-over';
+
+  const remap=v=>{ v=(v-0.5)*contrast+0.5; if(state.invert) v=1-v; return v<0?0:v>1?1:v; };
+  const lvl255=idx=>Math.round(idx/(L-1)*255);
+  const alphaMode=state.alpha, denom=Math.max(1,L-1);
+
+  if(state.mode==='rgb'){
+    for(let j=0;j<gy;j++){
+      const ty=j*cellH, row=B[j%n];
+      for(let i=0;i<gx;i++){
+        const tx=i*cellW, t=row[i%n];
+        const r=ditherLevel(remap(sampleChannel(tx,ty,cellW,cellH,0)),t,L);
+        const g=ditherLevel(remap(sampleChannel(tx,ty,cellW,cellH,1)),t,L);
+        const b=ditherLevel(remap(sampleChannel(tx,ty,cellW,cellH,2)),t,L);
+        if(alphaMode){
+          // colour stays; transparency follows overall brightness level
+          const bl=ditherLevel(remap(sampleBrightness(tx,ty,cellW,cellH)),t,L);
+          octx.globalAlpha=bl/denom;
+        }
+        octx.fillStyle=`rgb(${lvl255(r)},${lvl255(g)},${lvl255(b)})`;
+        octx.fillRect(Math.round(tx),Math.round(ty),Math.ceil(cellW)+1,Math.ceil(cellH)+1);
+      }
+    }
+    octx.globalAlpha=1;
+  } else {
+    const pal=buildLevels(L);
+    const ink=inkColor();
+    if(alphaMode) octx.fillStyle=ink;
+    for(let j=0;j<gy;j++){
+      const ty=j*cellH, row=B[j%n];
+      for(let i=0;i<gx;i++){
+        const tx=i*cellW, t=row[i%n];
+        const idx=ditherLevel(remap(sampleBrightness(tx,ty,cellW,cellH)),t,L);
+        if(alphaMode){
+          octx.globalAlpha=idx/denom;          // opaque where "on", fading to clear
+        } else {
+          octx.fillStyle=pal[idx];
+        }
+        octx.fillRect(Math.round(tx),Math.round(ty),Math.ceil(cellW)+1,Math.ceil(cellH)+1);
+      }
+    }
+    octx.globalAlpha=1;
+  }
+
+  document.getElementById('mGrid').textContent=gx+'×'+gy;
+  document.getElementById('mMatrix').textContent=n+'×'+n;
+  document.getElementById('mLevels').textContent=L;
+  document.getElementById('downloadBtn').disabled=false;
+}
+
+// ---- palette preview ----
+function drawLegend(){
+  const L=state.levels;
+  document.getElementById('variantCount').textContent=L+(L===2?' shades (1-bit)':' shades');
+  const wrap=document.getElementById('legend');
+  wrap.innerHTML='';
+  const checker=(cx,w,h)=>{ const s=6; for(let y=0;y<h;y+=s)for(let x=0;x<w;x+=s){cx.fillStyle=((x+y)/s)%2?'#777':'#555';cx.fillRect(x,y,s,s);} };
+
+  if(state.alpha){
+    // opacity ramp of the single ink colour over a checkerboard
+    const ink=inkColor();
+    for(let i=0;i<L;i++){
+      const colDiv=document.createElement('div'); colDiv.className='legend-col';
+      const cell=document.createElement('div'); cell.className='cell';
+      const cv=document.createElement('canvas'); cv.width=24;cv.height=24;
+      const cx=cv.getContext('2d'); checker(cx,24,24);
+      cx.globalAlpha=L===1?1:i/(L-1); cx.fillStyle=ink; cx.fillRect(0,0,24,24); cx.globalAlpha=1;
+      cv.style.width='100%';cv.style.height='100%';cv.style.display='block';
+      cell.appendChild(cv); colDiv.appendChild(cell); wrap.appendChild(colDiv);
+    }
+  } else if(state.mode==='rgb'){
+    const chans=[[1,0,0],[0,1,0],[0,0,1]];
+    chans.forEach(c=>{
+      const colDiv=document.createElement('div'); colDiv.className='legend-col';
+      const cell=document.createElement('div'); cell.className='cell';
+      const cv=document.createElement('canvas'); cv.width=L*8; cv.height=20;
+      const cx=cv.getContext('2d');
+      for(let i=0;i<L;i++){ const v=Math.round(i/(L-1)*255);
+        cx.fillStyle=`rgb(${c[0]*v},${c[1]*v},${c[2]*v})`; cx.fillRect(i*(cv.width/L),0,cv.width/L,20); }
+      cv.style.width='100%';cv.style.height='100%';cv.style.display='block';
+      cell.appendChild(cv); colDiv.appendChild(cell); wrap.appendChild(colDiv);
+    });
+  } else {
+    buildLevels(L).forEach(col=>{
+      const colDiv=document.createElement('div'); colDiv.className='legend-col';
+      const cell=document.createElement('div'); cell.className='cell';
+      const cv=document.createElement('canvas'); cv.width=24;cv.height=24;
+      const cx=cv.getContext('2d'); cx.fillStyle=col; cx.fillRect(0,0,24,24);
+      cv.style.width='100%';cv.style.height='100%';cv.style.display='block';
+      cell.appendChild(cv); colDiv.appendChild(cell); wrap.appendChild(colDiv);
+    });
+  }
+}
+
+// ---- loading (image OR video) ----
+const MAXDIM=1100;
+function fitSize(w,h){ const s=Math.min(1,MAXDIM/Math.max(w,h)); return [Math.max(1,Math.round(w*s)),Math.max(1,Math.round(h*s))]; }
+
+function loadFile(file){
+  if(file.type && file.type.startsWith('video/')) loadVideo(file);
+  else loadImage(file);
+}
+
+function loadImage(srcOrFile){
+  teardownVideo();
+  const img=new Image();
+  img.onload=()=>{
+    isVideo=false; srcImg=img;
+    [outW,outH]=fitSize(img.width,img.height);
+    captureSource();
+    showStage(false);
+    render();
+  };
+  if(srcOrFile instanceof Blob){const r=new FileReader();r.onload=e=>img.src=e.target.result;r.readAsDataURL(srcOrFile);}
+  else img.src=srcOrFile;
+}
+
+function loadVideo(file){
+  teardownVideo();
+  isVideo=true; srcImg=null;
+  videoEl=document.createElement('video');
+  videoEl.muted=true; videoEl.playsInline=true; videoEl.loop=true; videoEl.preload='auto';
+  videoEl.crossOrigin='anonymous';
+  videoEl.src=URL.createObjectURL(file);
+  videoEl.addEventListener('loadeddata',()=>{
+    [outW,outH]=fitSize(videoEl.videoWidth,videoEl.videoHeight);
+    captureSource();
+    showStage(true);
+    setupScrubber();
+    render();
+  },{once:true});
+  videoEl.addEventListener('seeked',()=>{ captureSource(); render(); });
+  videoEl.addEventListener('timeupdate',updateScrubber);
+  videoEl.addEventListener('ended',()=>{ if(!videoEl.loop){ playing=false; setPlayIcon(); }});
+  videoEl.load();
+}
+
+function teardownVideo(){
+  playing=false;
+  if(videoEl){ try{videoEl.pause();}catch(e){} if(videoEl.src) URL.revokeObjectURL(videoEl.src); videoEl=null; }
+}
+
+function showStage(video){
+  document.getElementById('drop').style.display='none';
+  document.getElementById('shell').style.display='flex';
+  document.getElementById('videoBar').style.display = video ? 'flex' : 'none';
+  document.getElementById('downloadBtn').textContent = video ? '⤓ Export video (WebM)' : '⤓ Download PNG';
+}
+
+// ---- video playback loop ----
+function frameLoop(){
+  if(!isVideo||!playing) return;
+  captureSource();
+  render();
+  if('requestVideoFrameCallback' in HTMLVideoElement.prototype) videoEl.requestVideoFrameCallback(frameLoop);
+  else requestAnimationFrame(frameLoop);
+}
+function play(){ if(!isVideo)return; playing=true; setPlayIcon(); videoEl.play(); frameLoop(); }
+function pause(){ if(!isVideo)return; playing=false; setPlayIcon(); videoEl.pause(); }
+function togglePlay(){ playing?pause():play(); }
+function setPlayIcon(){ const b=document.getElementById('playBtn'); if(b) b.textContent = playing?'❚❚':'►'; }
+
+function setupScrubber(){
+  const s=document.getElementById('scrub');
+  s.min=0; s.max=Math.max(0.01,videoEl.duration||0.01); s.step=0.001; s.value=0;
+  fill(s); updateTimeLabel();
+}
+function updateScrubber(){
+  if(recording) return;
+  const s=document.getElementById('scrub');
+  s.value=videoEl.currentTime; fill(s); updateTimeLabel();
+}
+function updateTimeLabel(){
+  const fmt=t=>{t=t||0;const m=Math.floor(t/60),sec=Math.floor(t%60);return m+':'+String(sec).padStart(2,'0');};
+  document.getElementById('timeLbl').textContent=fmt(videoEl.currentTime)+' / '+fmt(videoEl.duration);
+}
+
+// ---- export ----
+function pickMime(){
+  const cands=['video/mp4;codecs=avc1','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  for(const m of cands){ if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m; }
+  return 'video/webm';
+}
+function exportVideo(){
+  if(!isVideo||recording) return;
+  const mime=pickMime();
+  const ext=mime.startsWith('video/mp4')?'mp4':'webm';
+  const fps=30;
+  const stream=out.captureStream(fps);
+  // try to carry the original audio across
+  try{
+    const vs = videoEl.captureStream ? videoEl.captureStream() : (videoEl.mozCaptureStream&&videoEl.mozCaptureStream());
+    if(vs) vs.getAudioTracks().forEach(t=>stream.addTrack(t));
+  }catch(e){}
+  const rec=new MediaRecorder(stream,{mimeType:mime});
+  const chunks=[];
+  rec.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+  rec.onstop=()=>{
+    recording=false;
+    document.getElementById('downloadBtn').textContent='⤓ Export video (WebM)';
+    document.getElementById('downloadBtn').disabled=false;
+    const blob=new Blob(chunks,{type:mime});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='tileform.'+ext; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  };
+  // play the whole clip once, unmuted, capturing as we go
+  recording=true;
+  document.getElementById('downloadBtn').textContent='● Recording…';
+  document.getElementById('downloadBtn').disabled=true;
+  const wasLoop=videoEl.loop; videoEl.loop=false; videoEl.muted=false; videoEl.currentTime=0;
+  const begin=()=>{
+    rec.start();
+    playing=true; setPlayIcon(); videoEl.play(); frameLoop();
+    const onEnd=()=>{
+      videoEl.removeEventListener('ended',onEnd);
+      if(rec.state!=='inactive') rec.stop();
+      playing=false; setPlayIcon(); videoEl.loop=wasLoop; videoEl.muted=true;
+    };
+    videoEl.addEventListener('ended',onEnd);
+  };
+  if(videoEl.currentTime<0.05) begin();
+  else videoEl.addEventListener('seeked',begin,{once:true});
+}
+
+// ---- ui plumbing ----
+function applyAccent(){
+  document.documentElement.style.setProperty('--accent',
+    state.isGray?'hsl(0 0% 72%)':`hsl(${state.hue} 70% 55%)`);
+}
+function fill(el){const min=+el.min,max=+el.max,v=+el.value;el.style.setProperty('--p',((v-min)/(max-min)*100)+'%');}
+
+function bind(id,key,fmt,affectsLegend){
+  const el=document.getElementById(id), valEl=document.getElementById(id+'Val');
+  const upd=()=>{
+    state[key]=+el.value;
+    if(valEl) valEl.textContent=fmt?fmt(+el.value):el.value;
+    fill(el);
+    if(key==='hue'){state.isGray=false;markSwatch(-1);
+      document.getElementById('colorName').textContent='Custom';applyAccent();drawLegend();}
+    if(affectsLegend) drawLegend();
+    schedule();
+  };
+  el.addEventListener('input',upd);fill(el);
+}
+bind('hue','hue',v=>v+'°',true);
+bind('levels','levels',null,true);
+bind('pixel','pixel');
+bind('contrast','contrast',v=>(v/100).toFixed(2));
+
+let raf=null;
+function schedule(){if(raf)return;raf=requestAnimationFrame(()=>{raf=null;render();});}
+
+document.getElementById('invert').addEventListener('click',function(){
+  state.invert=!state.invert;this.classList.toggle('on',state.invert);render();
+});
+document.getElementById('alpha').addEventListener('click',function(){
+  state.alpha=!state.alpha;
+  this.classList.toggle('on',state.alpha);
+  document.querySelector('.canvas-frame').classList.toggle('alpha',state.alpha);
+  drawLegend();render();
+});
+
+// Bayer matrix size
+function setMatrix(n){
+  state.matrix=n;
+  [2,4,8,16].forEach(k=>document.getElementById('mx'+k).classList.toggle('on',k===n));
+  document.getElementById('matrixName').textContent=n+' × '+n;
+  render();
+}
+[2,4,8,16].forEach(k=>document.getElementById('mx'+k).addEventListener('click',()=>setMatrix(k)));
+
+// mode: mono / rgb
+function setMode(m){
+  state.mode=m;
+  document.getElementById('modeMono').classList.toggle('on',m==='mono');
+  document.getElementById('modeRGB').classList.toggle('on',m==='rgb');
+  drawLegend();
+  render();
+}
+document.getElementById('modeMono').addEventListener('click',()=>setMode('mono'));
+document.getElementById('modeRGB').addEventListener('click',()=>setMode('rgb'));
+
+const fileInput=document.getElementById('file');
+document.getElementById('uploadBtn').addEventListener('click',()=>fileInput.click());
+document.getElementById('drop').addEventListener('click',()=>fileInput.click());
+fileInput.addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.files[0]);});
+
+document.getElementById('downloadBtn').addEventListener('click',()=>{
+  if(isVideo){ exportVideo(); return; }
+  out.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tileform.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);},'image/png');
+});
+
+// video transport
+document.getElementById('playBtn').addEventListener('click',togglePlay);
+document.getElementById('scrub').addEventListener('input',e=>{
+  if(!isVideo)return; const wasPlaying=playing; if(wasPlaying)pause();
+  videoEl.currentTime=+e.target.value; fill(e.target);
+});
+document.getElementById('loopBtn').addEventListener('click',function(){
+  if(!isVideo)return; videoEl.loop=!videoEl.loop; this.classList.toggle('on',videoEl.loop);
+});
+
+const drop=document.getElementById('drop');
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f)loadFile(f);});
+document.body.addEventListener('dragover',e=>e.preventDefault());
+document.body.addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f&&(f.type.startsWith('image/')||f.type.startsWith('video/')))loadFile(f);});
+window.addEventListener('paste',e=>{const it=e.clipboardData&&e.clipboardData.items;if(!it)return;for(const x of it){if(x.type.startsWith('image/')){loadFile(x.getAsFile());break;}}});
+window.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='r'||e.key==='R')fileInput.click();
+  if(e.key===' '&&isVideo){e.preventDefault();togglePlay();}
+});
+
+applyAccent();
+drawLegend();
+</script>
+</body>
+</html>
